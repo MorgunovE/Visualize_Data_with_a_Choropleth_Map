@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>US Educational Attainment</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      text-align: center;
+      background-color: #f5f5f5;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+    #title {
+      margin-bottom: 10px;
+    }
+
+    #description {
+      margin-bottom: 20px;
+    }
+
+    #tooltip {
+      position: absolute;
+      padding: 10px;
+      background-color: rgba(255, 255, 255, 0.9);
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      pointer-events: none;
+      opacity: 0;
+      font-size: 14px;
+    }
+
+    .county:hover {
+      stroke: #000;
+      stroke-width: 1px;
+      cursor: pointer;
+    }
+
+    svg {
+      background-color: white;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      border-radius: 5px;
+    }
+  </style>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://d3js.org/topojson.v3.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h1 id="title">US Educational Attainment</h1>
+    <p id="description">Percentage of adults age 25 and older with a bachelor's degree or higher (2010-2014)</p>
+    <div id="map-container"></div>
+  </div>
+
+  <script>
+    // Data URLs
+    const COUNTY_URL = 'https://cdn.freecodecamp.org/testable-projects-fcc/data/choropleth_map/counties.json';
+    const EDUCATION_URL = 'https://cdn.freecodecamp.org/testable-projects-fcc/data/choropleth_map/for_user_education.json';
+
+    // Create main visualization
+    const width = 960;
+    const height = 600;
+    const margin = { top: 20, right: 20, bottom: 60, left: 20 };
+
+    // Create SVG
+    const svg = d3.select('#map-container')
+      .append('svg')
+      .attr('width', width)
+      .attr('height', height);
+
+    // Create tooltip
+    const tooltip = d3.select('body')
+      .append('div')
+      .attr('id', 'tooltip')
+      .style('opacity', 0);
+
+    // Load data
+    Promise.all([
+      d3.json(COUNTY_URL),
+      d3.json(EDUCATION_URL)
+    ]).then(([countyData, educationData]) => {
+
+      // Map education data by FIPS code for quick lookup
+      const educationById = {};
+      educationData.forEach(d => {
+        educationById[d.fips] = d;
+      });
+
+      // Create color scale
+      const educationValues = educationData.map(d => d.bachelorsOrHigher);
+      const minEdu = d3.min(educationValues);
+      const maxEdu = d3.max(educationValues);
+
+      // Create color thresholds for 8 levels
+      const colorScale = d3.scaleThreshold()
+        .domain(d3.range(minEdu, maxEdu, (maxEdu - minEdu) / 8))
+        .range(d3.schemeBlues[9]);
+
+      // Draw counties
+      svg.append('g')
+        .selectAll('path')
+        .data(topojson.feature(countyData, countyData.objects.counties).features)
+        .enter()
+        .append('path')
+        .attr('class', 'county')
+        .attr('data-fips', d => d.id)
+        .attr('data-education', d => {
+          return educationById[d.id] ? educationById[d.id].bachelorsOrHigher : 0;
+        })
+        .attr('fill', d => {
+          const edu = educationById[d.id] ? educationById[d.id].bachelorsOrHigher : 0;
+          return colorScale(edu);
+        })
+        .attr('d', d3.geoPath())
+        .attr('stroke', 'white')
+        .attr('stroke-width', 0.1)
+        .on('mouseover', (event, d) => {
+          const eduData = educationById[d.id];
+          tooltip
+            .style('opacity', 0.9)
+            .style('left', (event.pageX + 10) + 'px')
+            .style('top', (event.pageY - 40) + 'px')
+            .attr('data-education', eduData.bachelorsOrHigher)
+            .html(`
+              <strong>${eduData.area_name}, ${eduData.state}</strong><br>
+              ${eduData.bachelorsOrHigher}%
+            `);
+        })
+        .on('mouseout', () => {
+          tooltip.style('opacity', 0);
+        });
+
+      // State boundaries
+      svg.append('path')
+        .datum(topojson.mesh(countyData, countyData.objects.states, (a, b) => a !== b))
+        .attr('fill', 'none')
+        .attr('stroke', '#333')
+        .attr('stroke-width', 0.7)
+        .attr('d', d3.geoPath());
+
+      // Create legend
+      const legendWidth = 300;
+      const legendHeight = 10;
+      const legendX = width - legendWidth - margin.right;
+      const legendY = height - margin.bottom;
+
+      const legend = svg.append('g')
+        .attr('id', 'legend')
+        .attr('transform', `translate(${legendX}, ${legendY})`);
+
+      // Calculate legend item width based on color range
+      const legendItems = colorScale.range().length;
+      const legendItemWidth = legendWidth / legendItems;
+
+      // Add color rectangles to legend
+      legend.selectAll('rect')
+        .data(colorScale.range())
+        .enter()
+        .append('rect')
+        .attr('x', (d, i) => i * legendItemWidth)
+        .attr('y', 0)
+        .attr('width', legendItemWidth)
+        .attr('height', legendHeight)
+        .attr('fill', d => d);
+
+      // Add legend scale
+      const legendScale = d3.scaleLinear()
+        .domain([minEdu, maxEdu])
+        .range([0, legendWidth]);
+
+      const legendAxis = d3.axisBottom(legendScale)
+        .tickFormat(d => Math.round(d) + '%')
+        .tickSize(13)
+        .tickValues(colorScale.domain());
+
+      legend.append('g')
+        .call(legendAxis)
+        .attr('transform', `translate(0, ${legendHeight})`)
+        .selectAll('text')
+        .style('font-size', '11px');
+    });
+  </script>
+</body>
+</html>
